@@ -139,15 +139,16 @@ class Server(threading.Thread):
         enc_key = self.encrypt_key_with_public_key(self.key, client_public_key_obj)
         client.sendall(enc_key)
         
-    def client_handle(self, client, address):        
+    def client_handle(self, client: socket.socket, address):        
         try: 
             self.set_crypt_key(client)
                         
             while 1:
                 data = self.receive_message(client)
                 data_dec = self.decrypt_large_message(data)
-                
-                break
+                print(data_dec)
+                client.close()
+                sys.exit(1)
         except Exception as e:
             print(e)
             print('client handle')
