@@ -56,7 +56,7 @@ class Client{
       const buffer = Buffer.alloc(size);
       let bytesRead = 0;
       while (bytesRead < size) {
-          const chunk = await this.receive(socket, size - bytesRead);
+        const chunk = await this.receive(socket, size - bytesRead);
           if (!chunk) {
               return null;
           }
@@ -79,14 +79,22 @@ class Client{
   }
 
   async receive(socket, size) {
-      return new Promise((resolve) => {
-          socket.on('data', (data) => {
-              if (data.length >= size) {
-                  resolve(data.slice(0, size));
-              }
-          });
-      });
+    return new Promise((resolve) => {
+        let receivedData = Buffer.alloc(0);
+
+        const onData = (data) => {
+            receivedData = Buffer.concat([receivedData, data]);
+
+            if (receivedData.length >= size) {
+                socket.removeListener('data', onData);
+                resolve(receivedData.slice(0, size));
+            }
+        };
+
+        socket.on('data', onData);
+    });
   }
+
 
   unpackUInt32BE(buffer) {
       return buffer.readUInt32BE(0);
@@ -117,11 +125,12 @@ class Client{
     return crypto.privateDecrypt(privateKey, key);
   }
 
-  setCryptKey(client) {
+  async setCryptKey(client) {
     this.generateKeyPair();
-    client.write(this.publicKey);
-    const serverEncryptedKey = client.read(2048); 
-    console.log(this.secretKey);
+    const utf8EncodeText = new TextEncoder();
+    let bytes = utf8EncodeText.encode(this.publicKey);
+    client.write(bytes);
+    const serverEncryptedKey = await this.receiveData(client, 2048);
     this.secretKey = this.decryptKeyWithPrivateKey(serverEncryptedKey, this.privateKey);
   }
 
@@ -140,26 +149,18 @@ class Client{
     return decryptedData.toString('utf-8');
   }
 
-  run(){
-    console.log(this.host, this.port)
-    const client = net.createConnection({ host: this.host, port: this.port }, () => {
+  async run(){
+    const client = net.createConnection({ host: this.host, port: this.port, keepAlive: true }, () => {
       console.log('Conectado ao servidor');
     });
 
-    this.setCryptKey(client);
+    await this.setCryptKey(client);
+    console.log(this.secretKey, "depois da func")
+    client.write("Nada a se dizer");
 
-    // Variável para armazenar os dados recebidos
-    let receivedData = '';
-    // Recebe dados enviados pelo servidor
-    client.on('data', (chunk) => {
-      receivedData += chunk.toString();
-      console.log(receivedData);
+    client.on('end', () => {
+      console.log('Conexão encerrada');
     });
-
-    // Encerra a conexão com o servidor
-    // client.on('end', () => {
-    //   console.log('Conexão encerrada');
-    // });
   }
 }
 
