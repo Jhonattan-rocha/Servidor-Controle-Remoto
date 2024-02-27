@@ -137,18 +137,23 @@ class Server(threading.Thread):
         client_public_key = client.recv(2048)
         client_public_key_obj = self.load_public_key(client_public_key)
         enc_key = self.encrypt_key_with_public_key(self.key, client_public_key_obj)
-        client.sendall(enc_key)
+        self.send_message(client, enc_key)
         
-    def client_handle(self, client: socket.socket, address):        
+    def client_handle(self, client, address):        
         try: 
             self.set_crypt_key(client)
                         
             while 1:
                 data = self.receive_message(client)
-                data_dec = self.decrypt_large_message(data)
-                print(data_dec)
-                client.close()
-                sys.exit(1)
+                username = self.decrypt_large_message(data)
+                print(data, username, self.decrypt_large_message(data))
+                if not username:
+                    self.send_message(client, self.encrypt_large_message("Nome invalido".encode()))
+                    continue
+                self.save_clients((username, client))
+                self.send_messages(str("SERVER:" + f"{username.decode()} entrou no chat").encode())
+                threading.Thread(target=self.listen_message, args=(client, username)).start()
+                break
         except Exception as e:
             print(e)
             print('client handle')
@@ -172,6 +177,12 @@ class Server(threading.Thread):
                     sys.exit(1)
                 except Exception as e:
                     sys.exit(1)
+
+    def listen_message(self, client, username: bytes):
+        with client:
+            while True:
+                message = self.receive_message(client)
+                self.send_messages(f"[{username.decode()}]:[{self.decrypt_large_message(message).decode()}]".encode())     
 
 server = Server(HOST=HOST, PORT=PORT)
 server.start()
