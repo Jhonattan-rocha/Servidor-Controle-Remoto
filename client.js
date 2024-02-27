@@ -53,17 +53,21 @@ class Client{
   }
 
   async receiveData(socket, size) {
-      const buffer = Buffer.alloc(size);
+      let buffer = Buffer.alloc(size);
       let bytesRead = 0;
       while (bytesRead < size) {
         const chunk = await this.receive(socket, size - bytesRead);
-          if (!chunk) {
-              return null;
-          }
-          chunk.copy(buffer, bytesRead);
-          bytesRead += chunk.length;
+        if (!chunk) {
+            return null;
+        }
+        buffer = Buffer.concat([buffer, chunk]);
+        bytesRead += chunk.length;
+        if(bytesRead < size){
+          return buffer;
+        }
       }
-      return buffer;
+
+      return null;
   }
 
   async sendData(socket, data) {
@@ -79,22 +83,16 @@ class Client{
   }
 
   async receive(socket, size) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         let receivedData = Buffer.alloc(0);
-
         const onData = (data) => {
             receivedData = Buffer.concat([receivedData, data]);
-
-            if (receivedData.length >= size) {
-                socket.removeListener('data', onData);
-                resolve(receivedData.slice(0, size));
-            }
+            resolve(receivedData)
         };
 
         socket.on('data', onData);
     });
   }
-
 
   unpackUInt32BE(buffer) {
       return buffer.readUInt32BE(0);
@@ -128,10 +126,11 @@ class Client{
   async setCryptKey(client) {
     this.generateKeyPair();
     const utf8EncodeText = new TextEncoder();
+    const utf8DecodeText = new TextDecoder();
     let bytes = utf8EncodeText.encode(this.publicKey);
     client.write(bytes);
     const serverEncryptedKey = await this.receiveData(client, 2048);
-    this.secretKey = this.decryptKeyWithPrivateKey(serverEncryptedKey, this.privateKey);
+    this.secretKey = this.decryptKeyWithPrivateKey(utf8DecodeText.decode(serverEncryptedKey), this.privateKey);
   }
 
   encrypt(data) {
