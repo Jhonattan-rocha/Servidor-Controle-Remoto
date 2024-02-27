@@ -10,6 +10,13 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.uix.textinput import TextInput
+from kivy.uix.scrollview import ScrollView
 import struct
 
 HOST =  "127.0.0.1"
@@ -24,9 +31,8 @@ BUTTON_FONT = ("Helvetica", 15)
 SMALL_FONT = ("Helvetica", 13)
 
 
-class Client(threading.Thread):
+class Client(App):
     def __init__(self, HOST, PORT, BYTES) -> None:
-        threading.Thread.__init__(self)
         self.HOST = HOST
         self.PORT = PORT
         self.BYTES = BYTES
@@ -138,7 +144,7 @@ class Client(threading.Thread):
         self.fernet = Fernet(self.key)
     
     def connect(self, client):
-        user = self.username_textbox.get().encode()
+        user = str(self.username_textbox.text).encode()
         if user:
             client.connect((HOST, PORT))
         
@@ -148,20 +154,20 @@ class Client(threading.Thread):
             
             threading.Thread(target=self.listen_messages, args=(client, )).start()
             
-            self.username_button.config(state="disabled")
-            self.username_textbox.config(state="disabled")
-            self.message_textbox.config(state="normal")
-            self.message_button.config(state="normal")
+            self.username_button.disabled = True
+            self.username_textbox.disabled = True
+            self.message_textbox.disabled = False
+            self.message_button.disabled = False
             
     def add_message(self, message):
-        self.message_box.config(state=tk.NORMAL)
-        self.message_box.insert(tk.END, message + '\n')
-        self.message_box.config(state=tk.DISABLED)
+        self.message_box.disabled = False
+        self.message_box.text += message + '\n'
+        self.message_box.disabled = True
         
     def send_message_from_GUI(self, client: socket.socket):
-        mes = self.message_textbox.get().encode()
+        mes = str(self.message_textbox.text).encode()
         self.send_message(client, self.encrypt_large_message(mes))
-        self.message_textbox.delete(0, len(mes))
+        self.message_textbox.text = ""
     
     def listen_messages(self, client: socket.socket):
         while True:
@@ -172,53 +178,46 @@ class Client(threading.Thread):
     def on_closing(self, client: socket.socket):
         if messagebox.askokcancel("Fechar", "Deseja realmente fechar a aplicação?"):
             client.close()
-            self.root.destroy()
             sys.exit(0)
     
-    def run(self) -> None:
+    def build(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
             try:
-                self.root = tk.Tk()
-                self.root.geometry("600x600")
-                self.root.title("Messenger Client")
-                self.root.resizable(False, False)
-                self.root.protocol("WM_DELETE_WINDOW", lambda : self.on_closing(client))
-                self.root.grid_rowconfigure(0, weight=1)
-                self.root.grid_rowconfigure(1, weight=4)
-                self.root.grid_rowconfigure(2, weight=1)
+                self.root_layout = BoxLayout(orientation='vertical')
 
-                self.top_frame = tk.Frame(self.root, width=600, height=100, bg=DARK_GREY)
-                self.top_frame.grid(row=0, column=0, sticky=tk.NSEW)
+                # Top Frame
+                self.top_frame = BoxLayout(size=(600, 100), orientation='horizontal', spacing=10)
+                self.username_label = Label(text="Enter username:", size_hint=(None, None), font_size=16)
+                self.username_textbox = TextInput(font_size=16, size_hint=(None, None), width=300)
+                self.username_button = Button(text="Join", font_size=16, on_press=lambda : self.connect(client))
 
-                self.middle_frame = tk.Frame(self.root, width=600, height=400, bg=MEDIUM_GREY)
-                self.middle_frame.grid(row=1, column=0, sticky=tk.NSEW)
+                self.top_frame.add_widget(self.username_label)
+                self.top_frame.add_widget(self.username_textbox)
+                self.top_frame.add_widget(self.username_button)
 
-                self.bottom_frame = tk.Frame(self.root, width=600, height=100, bg=DARK_GREY)
-                self.bottom_frame.grid(row=2, column=0, sticky=tk.NSEW)
+                # Middle Frame
+                self.middle_frame = ScrollView(size=(600, 400))
+                self.message_box = TextInput(font_size=14, size_hint_y=None, height=400, multiline=True, readonly=True)
 
-                self.username_label = tk.Label(self.top_frame, text="Enter username:", font=FONT, bg=DARK_GREY, fg=WHITE)
-                self.username_label.pack(side=tk.LEFT, padx=10)
+                self.middle_frame.add_widget(self.message_box)
 
-                self.username_textbox = tk.Entry(self.top_frame, font=FONT, bg=MEDIUM_GREY, fg=WHITE, width=23)
-                self.username_textbox.pack(side=tk.LEFT)
-
-                self.username_button = tk.Button(self.top_frame, text="Join", font=BUTTON_FONT, bg=OCEAN_BLUE, fg=WHITE, command=lambda : self.connect(client))
-                self.username_button.pack(side=tk.LEFT, padx=15)
-
-                self.message_textbox = tk.Entry(self.bottom_frame, font=FONT, bg=MEDIUM_GREY, fg=WHITE, width=38)
-                self.message_textbox.pack(side=tk.LEFT, padx=10)
-
-                self.message_button = tk.Button(self.bottom_frame, text="Send", font=BUTTON_FONT, bg=OCEAN_BLUE, fg=WHITE, command=lambda : self.send_message_from_GUI(client))
-                self.message_button.pack(side=tk.LEFT, padx=10)
-
-                self.message_textbox.config(state="disabled")
-                self.message_button.config(state="disabled")
+                # Bottom Frame
+                self.bottom_frame = BoxLayout(size=(600, 100), orientation='horizontal', spacing=10)
+                self.message_textbox = TextInput(font_size=16, size_hint=(None, None), width=480)
+                self.message_button = Button(text="Send", font_size=16, on_press=lambda : self.send_message_from_GUI(client))
                 
-                self.message_box = scrolledtext.ScrolledText(self.middle_frame, font=SMALL_FONT, bg=MEDIUM_GREY, fg=WHITE, width=67, height=26.5)
-                self.message_box.config(state=tk.DISABLED)
-                self.message_box.pack(side=tk.TOP)
+                self.message_box.disabled = True
+                self.message_button.disabled = True
                 
-                self.root.mainloop()
+                self.bottom_frame.add_widget(self.message_textbox)
+                self.bottom_frame.add_widget(self.message_button)
+
+                # Adiciona os frames ao layout principal
+                self.root_layout.add_widget(self.top_frame)
+                self.root_layout.add_widget(self.middle_frame)
+                self.root_layout.add_widget(self.bottom_frame)
+
+                return self.root_layout
           
             except KeyboardInterrupt as e:
                 print(e)
@@ -228,5 +227,6 @@ class Client(threading.Thread):
                 sys.exit(1)
 
 
-client = Client(HOST, PORT, BYTES)
-client.start()
+if __name__ == "__main__":
+    client = Client(HOST, PORT, BYTES)
+    client.run()
