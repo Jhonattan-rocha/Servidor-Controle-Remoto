@@ -1,9 +1,6 @@
 import socket
 import threading
 import sys
-import tkinter as tk
-from tkinter import scrolledtext
-from tkinter import messagebox
 from cryptography.fernet import Fernet
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
@@ -11,6 +8,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from kivy.app import App
+from kivy.clock import Clock
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
@@ -33,6 +31,7 @@ SMALL_FONT = ("Helvetica", 13)
 
 class Client(App):
     def __init__(self, HOST, PORT, BYTES) -> None:
+        super(Client, self).__init__()
         self.HOST = HOST
         self.PORT = PORT
         self.BYTES = BYTES
@@ -40,7 +39,8 @@ class Client(App):
         self.fernet = None
         self.public_key = None
         self.private_key = None
-
+        self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        
     def generate_key_pair(self):
         private_key = rsa.generate_private_key(
             public_exponent=65537,
@@ -90,7 +90,7 @@ class Client(App):
             print(e)
             return b""
     
-    def receive_message(self, sock):
+    def receive_message(self, sock: socket.socket):
         # primeiro, receba o tamanho da mensagem
         raw_msglen = sock.recv(4)
         if not raw_msglen:
@@ -143,22 +143,26 @@ class Client(App):
         self.key = self.decrypt_key_with_private_key(fer_key, self.private_key)
         self.fernet = Fernet(self.key)
     
-    def connect(self, client):
-        user = str(self.username_textbox.text).encode()
-        if user:
-            client.connect((HOST, PORT))
+    def connect(self):
+        try:
+            user = str(self.username_textbox.text).encode()
+            if user:
+                self.client.connect((HOST, PORT))
+            
+                self.set_crypt_key(self.client)
+            
+                self.send_message(self.client, self.encrypt_large_message(user))
+                
+                threading.Thread(target=self.listen_messages, args=(self.client, )).start()
+                
+                self.username_button.disabled = True
+                self.username_textbox.disabled = True
+                self.message_textbox.disabled = False
+                self.message_button.disabled = False
+        except Exception as e:
+            print(e, 'dentro do connect')
+            self.client.close()
         
-            self.set_crypt_key(client)
-        
-            self.send_message(client, self.encrypt_large_message(user))
-            
-            threading.Thread(target=self.listen_messages, args=(client, )).start()
-            
-            self.username_button.disabled = True
-            self.username_textbox.disabled = True
-            self.message_textbox.disabled = False
-            self.message_button.disabled = False
-            
     def add_message(self, message):
         self.message_box.disabled = False
         self.message_box.text += message + '\n'
@@ -170,61 +174,70 @@ class Client(App):
         self.message_textbox.text = ""
     
     def listen_messages(self, client: socket.socket):
-        while True:
-            message = self.receive_message(client)
-
-            self.add_message(self.decrypt_large_message(message).decode())
-    
-    def on_closing(self, client: socket.socket):
-        if messagebox.askokcancel("Fechar", "Deseja realmente fechar a aplicação?"):
+        try:
+            while True:
+                message = self.receive_message(client)
+                if message:
+                    Clock.schedule_once(lambda dt: self.add_message(self.decrypt_large_message(message).decode()))
+                else:
+                    client.close()
+                    break
+        except Exception as e:
+            print(e)
+            print("Ouvindo mensagens")
             client.close()
-            sys.exit(0)
+            sys.exit(1)
+            
+    def on_stop(self):
+        self.client.sendall(b'exit')
+        self.client.close()
+        sys.exit(0)
+
     
     def build(self):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
-            try:
-                self.root_layout = BoxLayout(orientation='vertical')
+        try:
+            self.root_layout = BoxLayout(orientation='vertical', size=(600, 100))
 
-                # Top Frame
-                self.top_frame = BoxLayout(size=(600, 100), orientation='horizontal', spacing=10)
-                self.username_label = Label(text="Enter username:", size_hint=(None, None), font_size=16)
-                self.username_textbox = TextInput(font_size=16, size_hint=(None, None), width=300)
-                self.username_button = Button(text="Join", font_size=16, on_press=lambda : self.connect(client))
+            # Top Frame
+            self.top_frame = BoxLayout(orientation='horizontal', spacing=10)
+            self.username_label = Label(text="Enter username:", font_size=16)
+            self.username_textbox = TextInput(font_size=16, width=300)
+            self.username_button = Button(text="Join", font_size=16, on_press=lambda x: self.connect())
 
-                self.top_frame.add_widget(self.username_label)
-                self.top_frame.add_widget(self.username_textbox)
-                self.top_frame.add_widget(self.username_button)
+            self.top_frame.add_widget(self.username_label)
+            self.top_frame.add_widget(self.username_textbox)
+            self.top_frame.add_widget(self.username_button)
 
-                # Middle Frame
-                self.middle_frame = ScrollView(size=(600, 400))
-                self.message_box = TextInput(font_size=14, size_hint_y=None, height=400, multiline=True, readonly=True)
+            # Middle Frame
+            self.middle_frame = ScrollView(size=(600, 400))
+            self.message_box = TextInput(font_size=14, size_hint_y=None, height=400, multiline=True, readonly=True, background_color=(255,255,255))
 
-                self.middle_frame.add_widget(self.message_box)
+            self.middle_frame.add_widget(self.message_box)
 
-                # Bottom Frame
-                self.bottom_frame = BoxLayout(size=(600, 100), orientation='horizontal', spacing=10)
-                self.message_textbox = TextInput(font_size=16, size_hint=(None, None), width=480)
-                self.message_button = Button(text="Send", font_size=16, on_press=lambda : self.send_message_from_GUI(client))
-                
-                self.message_box.disabled = True
-                self.message_button.disabled = True
-                
-                self.bottom_frame.add_widget(self.message_textbox)
-                self.bottom_frame.add_widget(self.message_button)
+            # Bottom Frame
+            self.bottom_frame = BoxLayout(size=(150, 100), orientation='horizontal', spacing=10)
+            self.message_textbox = TextInput(font_size=16, width=480)
+            self.message_button = Button(text="Send", font_size=16, on_press=lambda x: self.send_message_from_GUI(self.client))
+            
+            self.message_box.disabled = True
+            self.message_button.disabled = True
+            
+            self.bottom_frame.add_widget(self.message_textbox)
+            self.bottom_frame.add_widget(self.message_button)
 
-                # Adiciona os frames ao layout principal
-                self.root_layout.add_widget(self.top_frame)
-                self.root_layout.add_widget(self.middle_frame)
-                self.root_layout.add_widget(self.bottom_frame)
+            # Adiciona os frames ao layout principal
+            self.root_layout.add_widget(self.top_frame)
+            self.root_layout.add_widget(self.middle_frame)
+            self.root_layout.add_widget(self.bottom_frame)
 
-                return self.root_layout
-          
-            except KeyboardInterrupt as e:
-                print(e)
-                sys.exit(1)
-            except Exception as e:
-                print(e)
-                sys.exit(1)
+            return self.root_layout
+        
+        except KeyboardInterrupt as e:
+            print(e)
+            sys.exit(1)
+        except Exception as e:
+            print(e)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

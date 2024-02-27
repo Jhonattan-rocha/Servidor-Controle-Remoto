@@ -99,7 +99,7 @@ class Server(threading.Thread):
         # junte os blocos e retorne a mensagem
         return b" ".join(chunks)
 
-    def send_message(self, sock, message):
+    def send_message(self, sock: socket.socket, message):
         # primeiro, envie o tamanho da mensagem
         msglen = len(message)
         sock.sendall(struct.pack('>I', msglen))
@@ -139,24 +139,31 @@ class Server(threading.Thread):
         enc_key = self.encrypt_key_with_public_key(self.key, client_public_key_obj)
         client.sendall(enc_key)
         
-    def client_handle(self, client, address):        
+    def client_handle(self, client: socket.socket, address):        
         try: 
             self.set_crypt_key(client)
                         
             while 1:
                 data = self.receive_message(client)
                 username = self.decrypt_large_message(data)
-                print(data, username, self.decrypt_large_message(data))
-                if not username:
+                if username == b'exit':
+                    self.clients.remove((username, client))
+                    client.close()
+                    break
+                if not username.strip():
                     self.send_message(client, self.encrypt_large_message("Nome invalido".encode()))
                     continue
                 self.save_clients((username, client))
-                self.send_messages(str("SERVER:" + f"{username.decode()} entrou no chat").encode())
+                self.send_messages(str(f"SERVER: {username.decode()} entrou no chat").encode())
                 threading.Thread(target=self.listen_message, args=(client, username)).start()
                 break
+            
+            return
         except Exception as e:
             print(e)
             print('client handle')
+            self.clients.remove((username, client))
+            client.close()
             sys.exit(1)
 
 
@@ -168,21 +175,38 @@ class Server(threading.Thread):
             
             print("Servidor rodando")
             while True:
-                (client, address) = server.accept()
-                
-                print(f"Conexão com o cliente do address {address}")
                 try:
+                    (client, address) = server.accept()
+                
+                    print(f"Conexão com o cliente do address {address}")
+
                     threading.Thread(target=self.client_handle, args=(client, address)).start()
                 except KeyboardInterrupt:
                     sys.exit(1)
                 except Exception as e:
+                    print(e)
                     sys.exit(1)
 
     def listen_message(self, client, username: bytes):
-        with client:
+        try:
             while True:
                 message = self.receive_message(client)
-                self.send_messages(f"[{username.decode()}]:[{self.decrypt_large_message(message).decode()}]".encode())     
+                if message:
+                    if self.decrypt_large_message(message) == b'exit':
+                        self.clients.remove((username, client))
+                        client.close()
+                        break
+                    self.send_messages(f"[{username.decode()}]:[{self.decrypt_large_message(message).decode()}]".encode())
+                else:
+                    self.clients.remove((username, client))
+                    client.close()
+                    break
+            sys.exit(0)
+        except Exception as e:
+            print(e)
+            self.clients.remove((username, client))
+            client.close()
+            sys.exit(1)
 
 server = Server(HOST=HOST, PORT=PORT)
 server.start()
